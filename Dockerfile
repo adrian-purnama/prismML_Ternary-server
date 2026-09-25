@@ -2,14 +2,17 @@
 
 # Base image is swappable so the same Dockerfile builds a CPU or a CUDA image.
 #   CPU:  BASE_IMAGE=ubuntu:24.04                          (default)
-#   CUDA: BASE_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu24.04
+#   CUDA: BASE_IMAGE=nvidia/cuda:12.8.1-runtime-ubuntu24.04 (pair with CUDA_VERSION=12.8 below)
 ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE}
 
 # cpu  -> Ubuntu x64 CPU build
-# cuda -> Linux x64 CUDA 12.4 build (needs a matching CUDA base image + nvidia-container-toolkit
-#         on the Dokploy host)
+# cuda -> Linux x64 CUDA build (needs a matching CUDA base image + nvidia-container-toolkit
+#         on the Dokploy host). CUDA_VERSION must match the fork's published binaries
+#         (12.4, 12.8 or 13.3) AND have an ubuntu24.04 nvidia/cuda base image tag --
+#         12.4.x only ships for ubuntu22.04, so 12.8 is the default here.
 ARG LLAMA_BACKEND=cpu
+ARG CUDA_VERSION=12.8
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl tar libgomp1 \
@@ -26,7 +29,7 @@ RUN set -eux; \
           | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/'); \
     case "$LLAMA_BACKEND" in \
         cpu)  PLATFORM="ubuntu-x64" ;; \
-        cuda) PLATFORM="linux-cuda-12.4-x64" ;; \
+        cuda) PLATFORM="linux-cuda-${CUDA_VERSION}-x64" ;; \
         *) echo "Unknown LLAMA_BACKEND: $LLAMA_BACKEND (use cpu or cuda)" >&2; exit 1 ;; \
     esac; \
     URL="https://github.com/PrismML-Eng/llama.cpp/releases/download/${TAG}/llama-${TAG}-bin-${PLATFORM}.tar.gz"; \
