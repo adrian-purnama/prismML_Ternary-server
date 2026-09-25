@@ -11,12 +11,13 @@ services:
     ports:
       - "11437:8080"
     environment:
-      BONSAI_PACKING: "PQ2_0"     # PTQ1_0 is faster on Ada-gen cards / L4; PQ2_0 elsewhere
+      BONSAI_PACKING: "PTQ1_0 "     # PTQ1_0 is faster on Ada-gen cards / L4; PQ2_0 elsewhere
       BONSAI_NGL: "99"            # offload every layer to GPU
-      BONSAI_CTX: "32768"
+      BONSAI_CTX: "16384"
       BONSAI_HOST: "0.0.0.0"
       PORT: "8080"
       BONSAI_VISION: "0"
+      BONSAI_EXTRA_ARGS: "--cache-type-k q4_0 --cache-type-v q4_0 --reasoning-budget 2048"
     volumes:
       - /hdd1/model-files/bonsai2:/models
     deploy:
@@ -26,6 +27,3 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-
-volumes:
-  bonsai_models:
