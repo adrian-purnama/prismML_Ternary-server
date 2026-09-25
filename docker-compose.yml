@@ -18,7 +18,7 @@ services:
       PORT: "8080"
       BONSAI_VISION: "0"
     volumes:
-      - /hdd1/model-files/bonsai2s:/models
+      - /hdd1/model-files/bonsai2:/models
     deploy:
       resources:
         reservations:
