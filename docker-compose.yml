@@ -11,7 +11,7 @@ services:
     ports:
       - "11437:8080"
     environment:
-      BONSAI_PACKING: "PTQ1_0 "     # PTQ1_0 is faster on Ada-gen cards / L4; PQ2_0 elsewhere
+      BONSAI_PACKING: "PTQ1_0"     # PTQ1_0 is faster on Ada-gen cards / L4; PQ2_0 elsewhere
       BONSAI_NGL: "99"            # offload every layer to GPU
       BONSAI_CTX: "16384"
       BONSAI_HOST: "0.0.0.0"
