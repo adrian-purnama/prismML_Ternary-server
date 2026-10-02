@@ -17,7 +17,7 @@ services:
       BONSAI_HOST: "0.0.0.0"
       PORT: "8080"
       BONSAI_VISION: "0"
-      BONSAI_EXTRA_ARGS: "--parallel 4 --cache-type-k q8_0 --cache-type-v q8_0 --reasoning-budget 2048""
+      BONSAI_EXTRA_ARGS: "--parallel 4 --cache-type-k q8_0 --cache-type-v q8_0 --reasoning-budget 2048"
     volumes:
       - /hdd1/model-files/bonsai2:/models
     deploy:
