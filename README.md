@@ -25,9 +25,11 @@ Each GPU runs its own copy of the model with `--parallel 4`, so the pair handles
 nginx sends each new request to whichever GPU has fewer requests in flight, and stops sending to a
 GPU whose container is down. The `X-Upstream` response header shows which GPU served a request.
 
-The AMD service passes through only the 6700 XT's device nodes. Check which ones those are with
-`ls -l /dev/dri/by-path/` (the `pci-0000:04:00.0` lines) and fix `card1` / `renderD128` in the
-compose file if they differ.
+The AMD service passes through only the 6700 XT's device nodes, by PCI address
+(`/dev/dri/by-path/pci-0000:04:00.0-*`), because the `cardN` / `renderDN` numbers change between
+boots. If the card moves to another slot, update the address from `ls -l /dev/dri/by-path/`.
+Confirm the GPU is used with `docker exec <amd container> /opt/bonsai/bin/llama-server --list-devices`
+(it should list a Vulkan device, not `(none)`).
 
 `LLAMA_BACKEND` build arg: `cpu`, `cuda`, `vulkan` or `rocm` (ROCm needs
 `BASE_IMAGE=rocm/dev-ubuntu-24.04:7.2`, `/dev/kfd`, and `HSA_OVERRIDE_GFX_VERSION=10.3.0` on a 6700 XT).
