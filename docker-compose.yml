@@ -1,5 +1,5 @@
 services:
-  bonsai:
+  bonsai-nvidia:
     build:
       context: .
       args:
@@ -11,8 +11,8 @@ services:
     ports:
       - "11437:8080"
     environment:
-      BONSAI_PACKING: "PQ2_0"     # PTQ1_0 is faster on Ada-gen cards / L4; PQ2_0 elsewhere
-      BONSAI_NGL: "99"            # offload every layer to GPU
+      BONSAI_PACKING: "PQ2_0"     # 3060 is Ampere, so PQ2_0
+      BONSAI_NGL: "99"
       BONSAI_CTX: "16384"
       BONSAI_HOST: "0.0.0.0"
       PORT: "8080"
@@ -25,5 +25,34 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["0"]   # RTX 3060
               capabilities: [gpu]
+
+  bonsai-amd:
+    build:
+      context: .
+      args:
+        BASE_IMAGE: ubuntu:24.04
+        LLAMA_BACKEND: vulkan     # or "rocm" with a rocm/dev-ubuntu-24.04 base image
+    image: bonsai2-server:vulkan
+    restart: unless-stopped
+    ports:
+      - "11438:8080"
+    devices:
+      - /dev/kfd:/dev/kfd                          # needed for ROCm; harmless for Vulkan
+      - /dev/dri/card1:/dev/dri/card1              # verify: must be the 04:00.0 card
+      - /dev/dri/renderD128:/dev/dri/renderD128    # verify: must be the 04:00.0 render node
+    group_add:
+      - video
+      - render
+    environment:
+      BONSAI_PACKING: "PQ2_0"
+      BONSAI_NGL: "99"
+      BONSAI_CTX: "16384"
+      BONSAI_HOST: "0.0.0.0"
+      PORT: "8080"
+      BONSAI_VISION: "0"
+      BONSAI_EXTRA_ARGS: "--no-mmap --parallel 4 --cache-type-k q8_0 --cache-type-v q8_0 --reasoning-budget 2048"
+      HSA_OVERRIDE_GFX_VERSION: "10.3.0"           # ROCm only (6700 XT = gfx1031); ignored by Vulkan
+    volumes:
+      - /hdd1/model-files/bonsai2:/models
