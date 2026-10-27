@@ -23,7 +23,11 @@ file or silently output garbage.
 
 Each GPU runs its own copy of the model with `--parallel 4`, so the pair handles 8 requests at once.
 nginx sends each new request to whichever GPU has fewer requests in flight, and stops sending to a
-GPU whose container is down. The `X-Upstream` response header shows which GPU served a request.
+GPU whose container is down, and picks up a restarted GPU container's new IP within 10 seconds.
+The `X-Upstream` response header shows which GPU served a request.
+
+A load-test page is served by the load balancer at `http://<server-ip>:11436/bench/`, already
+pointed at the API on the same address.
 
 The AMD service gets the whole `/dev/dri` directory with the host's device names (the AMD driver
 breaks if the render node is renamed). Confirm the GPU is used with
