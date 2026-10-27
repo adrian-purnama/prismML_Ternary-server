@@ -51,14 +51,11 @@ services:
       - "11438:8080"              # direct access to the 6700 XT, for debugging
     devices:
       - /dev/kfd:/dev/kfd                          # needed for ROCm; harmless for Vulkan
-      # RX 6700 XT by PCI address (04:00.0). card/renderD numbers change between boots,
-      # so map the stable by-path names onto fixed names inside the container.
-      - source: /dev/dri/by-path/pci-0000:04:00.0-card
-        target: /dev/dri/card0
-        permissions: rwm
-      - source: /dev/dri/by-path/pci-0000:04:00.0-render
-        target: /dev/dri/renderD128
-        permissions: rwm
+      # Pass /dev/dri through with the host's own names: the AMD driver looks up the render
+      # node by its real number, so renaming it (or picking card/renderD numbers by hand,
+      # which change between boots) breaks it. RADV only opens AMD cards, so the 3060's
+      # nodes in here are ignored.
+      - /dev/dri:/dev/dri
     environment:
       BONSAI_PACKING: "PQ2_0"
       BONSAI_NGL: "99"
