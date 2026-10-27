@@ -11,11 +11,18 @@ FROM ${BASE_IMAGE}
 #         on the Dokploy host). CUDA_VERSION must match the fork's published binaries
 #         (12.4, 12.8 or 13.3) AND have an ubuntu24.04 nvidia/cuda base image tag --
 #         12.4.x only ships for ubuntu22.04, so 12.8 is the default here.
+# vulkan -> Ubuntu x64 Vulkan build (AMD/Intel/NVIDIA; BASE_IMAGE=ubuntu:24.04). Needs /dev/dri.
+# rocm   -> Ubuntu x64 ROCm build (AMD; BASE_IMAGE=rocm/dev-ubuntu-24.04:<ROCM_VERSION>).
+#           Needs /dev/kfd + /dev/dri, and HSA_OVERRIDE_GFX_VERSION=10.3.0 on RX 6700/6750 XT.
 ARG LLAMA_BACKEND=cpu
 ARG CUDA_VERSION=12.8
+ARG ROCM_VERSION=7.2
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl tar libgomp1 \
+RUN set -eux; \
+    EXTRA=""; \
+    if [ "$LLAMA_BACKEND" = "vulkan" ]; then EXTRA="libvulkan1 mesa-vulkan-drivers"; fi; \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl tar libgomp1 $EXTRA \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/bonsai
@@ -30,7 +37,9 @@ RUN set -eux; \
     case "$LLAMA_BACKEND" in \
         cpu)  PLATFORM="ubuntu-x64" ;; \
         cuda) PLATFORM="linux-cuda-${CUDA_VERSION}-x64" ;; \
-        *) echo "Unknown LLAMA_BACKEND: $LLAMA_BACKEND (use cpu or cuda)" >&2; exit 1 ;; \
+        vulkan) PLATFORM="ubuntu-vulkan-x64" ;; \
+        rocm) PLATFORM="ubuntu-rocm-${ROCM_VERSION}-x64" ;; \
+        *) echo "Unknown LLAMA_BACKEND: $LLAMA_BACKEND (use cpu, cuda, vulkan or rocm)" >&2; exit 1 ;; \
     esac; \
     URL="https://github.com/PrismML-Eng/llama.cpp/releases/download/${TAG}/llama-${TAG}-bin-${PLATFORM}.tar.gz"; \
     echo "Fetching ${URL}"; \
