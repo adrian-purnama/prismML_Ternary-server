@@ -1,11 +1,12 @@
 services:
   bonsai-lb:
-    image: nginx:alpine
+    image: nginx:1.29-alpine      # 1.27.3+ needed for 'resolve' in upstream blocks
     restart: unless-stopped
     ports:
       - "11436:80"                # single production endpoint (load-balances both GPUs)
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./bench:/usr/share/nginx/bench:ro
     depends_on:
       - bonsai-nvidia
       - bonsai-amd

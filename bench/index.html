@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LLM TPS &amp; Concurrency Test</title>
+<style>
+:root{--bg:#f6f7f5;--fg:#1c2320;--mut:#5f6b66;--card:#fff;--line:#d5dad6;--acc:#0f766e;--err:#b42318}
+@media(prefers-color-scheme:dark){:root{--bg:#121816;--fg:#e6ece8;--mut:#93a09a;--card:#1a2220;--line:#2c3733;--acc:#4fd1c0;--err:#ff8a7a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+main{max-width:920px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:20px;margin:0 0 4px}
+p.sub{color:var(--mut);margin:0 0 16px;font-size:13px}
+section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px}
+label{display:block;font-size:13px;color:var(--mut);margin:0 0 4px}
+input,textarea{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;font:13px ui-monospace,Menlo,Consolas,monospace}
+textarea{min-height:170px;resize:vertical}
+input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:10px}
+.btns{display:flex;gap:8px;margin-top:10px}
+button{border:0;border-radius:6px;padding:9px 18px;font:600 14px system-ui;cursor:pointer;background:var(--acc);color:#fff}
+button.stop{background:var(--err)}
+button:disabled{opacity:.4;cursor:default}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.stat b{display:block;font:600 22px ui-monospace,Menlo,Consolas,monospace}
+.stat span{font-size:12px;color:var(--mut)}
+.wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font:12px ui-monospace,Menlo,Consolas,monospace}
+th,td{text-align:right;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
+th{color:var(--mut);font-weight:500}
+.err{color:var(--err)}
+small{color:var(--mut)}
+</style>
+</head>
+<body>
+<main>
+<h1>LLM TPS &amp; concurrency test</h1>
+<p class="sub">Each worker sends a request, and as soon as it finishes sends the next one. Works with streaming OpenAI-style and Ollama endpoints.</p>
+
+<section>
+  <label for="url">Endpoint URL</label>
+  <input id="url" value="/v1/chat/completions">
+  <div class="row" style="margin-top:10px">
+    <div><label for="conc">Concurrency (workers)</label><input id="conc" type="number" min="1" value="4"></div>
+    <div><label for="total">Total requests (0 = until stopped)</label><input id="total" type="number" min="0" value="0"></div>
+    <div><label for="key">API key (optional)</label><input id="key" placeholder="sk-..."></div>
+  </div>
+  <label for="hdr">Extra headers (JSON, optional)</label>
+  <input id="hdr" placeholder='{"X-Foo":"bar"}'>
+  <label for="body" style="margin-top:10px">Request body <small>&mdash; <code>{{i}}</code> is replaced by the request number</small></label>
+  <textarea id="body" spellcheck="false">{
+  "model": "bonsai2",
+  "stream": true,
+  "stream_options": {"include_usage": true},
+  "max_tokens": 512,
+  "messages": [
+    {"role": "user", "content": "Write a short story about a robot. Request {{i}}"}
+  ]
+}</textarea>
+  <div class="btns">
+    <button id="go">Start</button>
+    <button id="stop" class="stop" disabled>Stop</button>
+  </div>
+  <p id="msg" class="err" style="margin:8px 0 0;font-size:13px"></p>
+</section>
+
+<section>
+  <div class="stats">
+    <div class="stat"><b id="sAct">0</b><span>in flight</span></div>
+    <div class="stat"><b id="sDone">0</b><span>completed</span></div>
+    <div class="stat"><b id="sErr">0</b><span>errors</span></div>
+    <div class="stat"><b id="sLive">0</b><span>live tokens/s (3s)</span></div>
+    <div class="stat"><b id="sAgg">0</b><span>aggregate tokens/s</span></div>
+    <div class="stat"><b id="sAvg">0</b><span>avg per-request tokens/s</span></div>
+    <div class="stat"><b id="sTtft">0</b><span>avg TTFT (ms)</span></div>
+    <div class="stat"><b id="sTok">0</b><span>total tokens</span></div>
+  </div>
+</section>
+
+<section class="wrap">
+  <table>
+    <thead><tr><th>#</th><th>status</th><th>TTFT ms</th><th>tokens</th><th>tok/s</th><th>total s</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</section>
+<p class="sub">The server must allow CORS from this page (Ollama: set <code>OLLAMA_ORIGINS=*</code>; llama.cpp server: allowed by default). Token count uses the server's usage/eval_count when available, otherwise counts streamed chunks.</p>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+if (location.protocol.startsWith('http')) $('url').value = location.origin + '/v1/chat/completions';
+let running = false, started = 0, active = 0, done = 0, errs = 0, totalTok = 0, t0 = 0;
+let ttfts = [], tpsList = [], events = [], rows = [], ctrls = new Set();
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function one(id, cfg){
+  const ctrl = new AbortController(); ctrls.add(ctrl);
+  const s = performance.now();
+  let first = null, chunks = 0, usage = null, status = 'ok';
+  const handle = line => {
+    line = line.trim();
+    if (!line || line[0] === ':') return;
+    if (line.startsWith('data:')) line = line.slice(5).trim();
+    if (line === '[DONE]') return;
+    let j; try { j = JSON.parse(line); } catch { return; }
+    const c = j.choices && j.choices[0];
+    const txt = (c && ((c.delta && (c.delta.content || c.delta.reasoning_content)) || c.text || (c.message && c.message.content)))
+      || (j.message && j.message.content) || j.response;
+    if (txt) { if (first === null) first = performance.now(); chunks++; events.push([performance.now(), 1]); }
+    if (j.usage && j.usage.completion_tokens) usage = j.usage.completion_tokens;
+    if (j.eval_count) usage = j.eval_count;
+  };
+  try {
+    const r = await fetch(cfg.url, {
+      method: 'POST', headers: cfg.headers, signal: ctrl.signal,
+      body: cfg.body.replace(/\{\{i\}\}/g, id)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0, 100));
+    const ct = r.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      handle(JSON.stringify(await r.json()));
+    } else {
+      const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+      for (;;) {
+        const { done: d, value } = await rd.read();
+        if (d) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n'); buf = parts.pop();
+        parts.forEach(handle);
+      }
+      if (buf) handle(buf);
+    }
+    const end = performance.now();
+    const tok = usage != null ? usage : chunks;
+    const gen = (end - (first != null ? first : s)) / 1000;
+    const tps = tok > 1 && gen > 0 ? (tok - 1) / gen : (tok / ((end - s) / 1000));
+    totalTok += tok; done++;
+    if (first != null) ttfts.push(first - s);
+    tpsList.push(tps);
+    rows.unshift({ id, status, ttft: first != null ? first - s : null, tok, tps, total: (end - s) / 1000 });
+  } catch (e) {
+    if (e.name === 'AbortError') status = 'stopped'; else { status = e.message; errs++; }
+    rows.unshift({ id, status, ttft: null, tok: 0, tps: 0, total: (performance.now() - s) / 1000 });
+    if (status !== 'stopped') $('msg').textContent = 'Error: ' + status + (status.startsWith('HTTP') ? '' : ' (check URL, server running, CORS)');
+  } finally { ctrls.delete(ctrl); }
+}
+
+async function worker(cfg){
+  while (running && (cfg.total === 0 || started < cfg.total)) {
+    const id = ++started; active++;
+    await one(id, cfg);
+    active--;
+    if (status_is_fatal()) break;
+  }
+}
+function status_is_fatal(){ return errs >= 5 && done === 0; } // stop if nothing works
+
+async function start(){
+  $('msg').textContent = '';
+  const cfg = {
+    url: $('url').value.trim(),
+    total: Math.max(0, parseInt($('total').value) || 0),
+    conc: Math.max(1, parseInt($('conc').value) || 1),
+    body: $('body').value, headers: { 'Content-Type': 'application/json' }
+  };
+  try { JSON.parse(cfg.body.replace(/\{\{i\}\}/g, '1')); } catch (e) { $('msg').textContent = 'Body is not valid JSON: ' + e.message; return; }
+  try { const h = $('hdr').value.trim(); if (h) Object.assign(cfg.headers, JSON.parse(h)); }
+  catch (e) { $('msg').textContent = 'Headers are not valid JSON.'; return; }
+  if ($('key').value.trim()) cfg.headers.Authorization = 'Bearer ' + $('key').value.trim();
+
+  started = active = done = errs = totalTok = 0; ttfts = []; tpsList = []; events = []; rows = [];
+  t0 = performance.now(); running = true;
+  $('go').disabled = true; $('stop').disabled = false;
+  await Promise.all(Array.from({ length: cfg.conc }, () => worker(cfg)));
+  running = false; $('go').disabled = false; $('stop').disabled = true;
+  t0Final = performance.now(); render();
+}
+let t0Final = 0;
+function stop(){ running = false; ctrls.forEach(c => c.abort()); }
+
+const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+function render(){
+  const now = performance.now(), el = ((running ? now : (t0Final || now)) - t0) / 1000;
+  events = events.filter(e => now - e[0] < 3000);
+  const win = Math.min(3, el || 3);
+  $('sAct').textContent = active; $('sDone').textContent = done; $('sErr').textContent = errs;
+  $('sLive').textContent = running ? (events.length / win).toFixed(1) : '0';
+  $('sAgg').textContent = el > 0 ? (totalTok / el).toFixed(1) : '0';
+  $('sAvg').textContent = avg(tpsList).toFixed(1);
+  $('sTtft').textContent = Math.round(avg(ttfts));
+  $('sTok').textContent = totalTok;
+  $('rows').innerHTML = rows.slice(0, 15).map(r =>
+    `<tr><td>${r.id}</td><td class="${r.status === 'ok' ? '' : 'err'}">${esc(r.status.slice(0, 40))}</td><td>${r.ttft != null ? Math.round(r.ttft) : '-'}</td><td>${r.tok}</td><td>${r.tps.toFixed(1)}</td><td>${r.total.toFixed(2)}</td></tr>`).join('');
+}
+setInterval(render, 250);
+$('go').onclick = start; $('stop').onclick = stop;
+</script>
+</body>
+</html>
