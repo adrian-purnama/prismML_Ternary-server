@@ -1,17 +1,5 @@
 services:
-  bonsai-lb:
-    image: nginx:1.29-alpine      # 1.27.3+ needed for 'resolve' in upstream blocks
-    restart: unless-stopped
-    ports:
-      - "11436:80"                # single production endpoint (load-balances both GPUs)
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./bench:/usr/share/nginx/bench:ro
-    depends_on:
-      - bonsai-nvidia
-      - bonsai-amd
-
-  bonsai-nvidia:
+  bonsai:
     build:
       context: .
       args:
@@ -21,10 +9,10 @@ services:
     image: bonsai2-server:cuda
     restart: unless-stopped
     ports:
-      - "11437:8080"              # direct access to the 3060, for debugging
+      - "11437:8080"
     environment:
-      BONSAI_PACKING: "PQ2_0"     # 3060 is Ampere, so PQ2_0
-      BONSAI_NGL: "99"
+      BONSAI_PACKING: "PQ2_0"     # PTQ1_0 is faster on Ada-gen cards / L4; PQ2_0 elsewhere
+      BONSAI_NGL: "99"            # offload every layer to GPU
       BONSAI_CTX: "16384"
       BONSAI_HOST: "0.0.0.0"
       PORT: "8080"
@@ -37,34 +25,5 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["0"]   # RTX 3060
+              count: 1
               capabilities: [gpu]
-
-  bonsai-amd:
-    build:
-      context: .
-      args:
-        BASE_IMAGE: ubuntu:24.04
-        LLAMA_BACKEND: vulkan     # or: rocm, with BASE_IMAGE rocm/dev-ubuntu-24.04:7.2
-    image: bonsai2-server:vulkan
-    restart: unless-stopped
-    ports:
-      - "11438:8080"              # direct access to the 6700 XT, for debugging
-    devices:
-      - /dev/kfd:/dev/kfd                          # needed for ROCm; harmless for Vulkan
-      # Pass /dev/dri through with the host's own names: the AMD driver looks up the render
-      # node by its real number, so renaming it (or picking card/renderD numbers by hand,
-      # which change between boots) breaks it. RADV only opens AMD cards, so the 3060's
-      # nodes in here are ignored.
-      - /dev/dri:/dev/dri
-    environment:
-      BONSAI_PACKING: "PQ2_0"
-      BONSAI_NGL: "99"
-      BONSAI_CTX: "16384"
-      BONSAI_HOST: "0.0.0.0"
-      PORT: "8080"
-      BONSAI_VISION: "0"
-      BONSAI_EXTRA_ARGS: "--no-mmap --parallel 4 --cache-type-k q8_0 --cache-type-v q8_0 --reasoning-budget 2048"
-      HSA_OVERRIDE_GFX_VERSION: "10.3.0"           # ROCm only (6700 XT = gfx1031); ignored by Vulkan
-    volumes:
-      - /hdd1/model-files/bonsai2:/models

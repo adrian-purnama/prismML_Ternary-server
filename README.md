@@ -10,32 +10,8 @@ file or silently output garbage.
 
 - `Dockerfile` — builds an image around the PrismML llama.cpp fork's prebuilt binaries
 - `entrypoint.sh` — downloads the GGUF into `/models` on first boot (cached after that), then starts `llama-server`
-- `docker-compose.yml` — two-GPU deployment: RTX 3060 (CUDA) + RX 6700 XT (Vulkan), behind an nginx load balancer
-- `nginx.conf` — load balancer config (`least_conn` across both GPU servers)
-
-## Two-GPU setup
-
-| Port    | What                                   |
-| ------- | -------------------------------------- |
-| `11436` | Load balancer — use this in production |
-| `11437` | RTX 3060 directly (CUDA)               |
-| `11438` | RX 6700 XT directly (Vulkan)           |
-
-Each GPU runs its own copy of the model with `--parallel 4`, so the pair handles 8 requests at once.
-nginx sends each new request to whichever GPU has fewer requests in flight, and stops sending to a
-GPU whose container is down, and picks up a restarted GPU container's new IP within 10 seconds.
-The `X-Upstream` response header shows which GPU served a request.
-
-A load-test page is served by the load balancer at `http://<server-ip>:11436/bench/`, already
-pointed at the API on the same address.
-
-The AMD service gets the whole `/dev/dri` directory with the host's device names (the AMD driver
-breaks if the render node is renamed). Confirm the GPU is used with
-`docker exec <amd container> /opt/bonsai/bin/llama-server --list-devices`: it should list a Vulkan
-device, not `(none)`.
-
-`LLAMA_BACKEND` build arg: `cpu`, `cuda`, `vulkan` or `rocm` (ROCm needs
-`BASE_IMAGE=rocm/dev-ubuntu-24.04:7.2`, `/dev/kfd`, and `HSA_OVERRIDE_GFX_VERSION=10.3.0` on a 6700 XT).
+- `docker-compose.yml` — CPU-only deployment (works on any Dokploy VPS, no GPU needed)
+- `docker-compose.gpu.yml` — NVIDIA GPU deployment (needs `nvidia-container-toolkit` on the host)
 
 ## Deploying on Dokploy
 
